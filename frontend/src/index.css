@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 2px;
+}
+
+.highlight-pulse {
+  animation: pulse-amber 1.5s ease-in-out 3;
+}
+
+@keyframes pulse-amber {
+  0%, 100% { background-color: rgba(251, 191, 36, 0.25); }
+  50%       { background-color: rgba(251, 191, 36, 0.55); }
+}
