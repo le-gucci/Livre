@@ -161,6 +161,7 @@ export default function AnnotationModal({ page, userId, onSave, onClose }) {
             <img
               ref={imgRef}
               src={page.image_url}
+              crossOrigin="anonymous"
               alt=""
               onLoad={(e) => {
                 const canvas = canvasRef.current

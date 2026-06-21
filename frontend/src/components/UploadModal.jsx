@@ -3,6 +3,20 @@ import { supabase } from '../lib/supabase'
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL
 
+const compressImage = (file, maxWidth = 1500) =>
+  new Promise((resolve) => {
+    const img = new Image()
+    img.onload = () => {
+      const ratio = Math.min(1, maxWidth / img.width)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * ratio)
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      canvas.toBlob(resolve, 'image/jpeg', 0.88)
+    }
+    img.src = URL.createObjectURL(file)
+  })
+
 export default function UploadModal({ book, pages, userId, onComplete, onClose }) {
   const fileRef = useRef()
   const [file, setFile] = useState(null)
@@ -58,8 +72,9 @@ export default function UploadModal({ book, pages, userId, onComplete, onClose }
 
       // 4. Send to backend for underline detection
       setStatus('Detecting underlines…')
+      const compressed = await compressImage(file)
       const form = new FormData()
-      form.append('file', file)
+      form.append('file', compressed, 'page.jpg')
       const res = await fetch(`${BACKEND}/process-image`, { method: 'POST', body: form })
       const { entries: detected } = await res.json()
 

@@ -1,5 +1,5 @@
 import os
-import io
+import asyncio
 import numpy as np
 import cv2
 import pytesseract
@@ -113,13 +113,13 @@ async def process_image(file: UploadFile = File(...)):
     img = load_image(data)
     underlines = detect_underlines(img)
 
-    results = []
-    for u in underlines:
+    async def process_one(u):
         t = await translate(u["phrase"])
         s = await summarise(u["phrase"], t)
-        results.append({**u, "translation": t, "summary": s})
+        return {**u, "translation": t, "summary": s}
 
-    return {"entries": results}
+    results = await asyncio.gather(*[process_one(u) for u in underlines])
+    return {"entries": list(results)}
 
 
 class OcrRequest(BaseModel):
