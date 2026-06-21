@@ -23,9 +23,18 @@ def load_image(data: bytes) -> np.ndarray:
     return img
 
 
-def ocr_region(img_bgr: np.ndarray, psm: int = 7) -> str:
-    pil = Image.fromarray(cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB))
-    pil = pil.resize((pil.width * 3, pil.height * 3), Image.LANCZOS)
+def preprocess_crop(img_bgr: np.ndarray) -> Image.Image:
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+    h, w = gray.shape
+    gray = cv2.resize(gray, (w * 3, h * 3), interpolation=cv2.INTER_LANCZOS4)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return Image.fromarray(binary)
+
+
+def ocr_region(img_bgr: np.ndarray, psm: int = 6) -> str:
+    pil = preprocess_crop(img_bgr)
     return pytesseract.image_to_string(pil, lang="fra", config=f"--psm {psm} --oem 3").strip()
 
 
@@ -159,7 +168,9 @@ async def ocr_region_endpoint(body: OcrRegionBody):
     y2 = min(ih, int((body.y + body.h) * ih))
 
     phrase_crop = img[y1:y2, x1:x2]
-    text = ocr_region(phrase_crop, psm=7)
+    text = ocr_region(phrase_crop, psm=6)
+    if not text:
+        text = ocr_region(phrase_crop, psm=3)  # fully automatic fallback
 
     ph = y2 - y1
     ctx_y1 = max(0, y1 - ph * 3)

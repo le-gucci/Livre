@@ -99,6 +99,11 @@ export default function AnnotationModal({ page, userId, onSave, onClose }) {
         body: JSON.stringify({ image_url: page.image_url, x: nx, y: ny, w: nw, h: nh }),
       })
       const { text, context } = await ocrRes.json()
+      if (!text || !text.trim()) {
+        setStatus('No text detected — try a tighter box around the phrase')
+        setLoading(false)
+        return
+      }
       setOcrText(text)
 
       setStatus('Translating…')
