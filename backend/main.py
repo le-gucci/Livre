@@ -119,7 +119,7 @@ async def summarise(french: str, english: str, context: str = "") -> str:
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
             json={
-                "model": "llama3-8b-8192",
+                "model": "llama-3.1-8b-instant",
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": 60,
                 "temperature": 0.3,
@@ -127,6 +127,7 @@ async def summarise(french: str, english: str, context: str = "") -> str:
         )
         data = r.json()
         if "choices" not in data:
+            print(f"Groq error: {data}")
             return ""
         return data["choices"][0]["message"]["content"].strip()
 
