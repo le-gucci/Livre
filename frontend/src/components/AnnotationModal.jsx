@@ -7,6 +7,7 @@ export default function AnnotationModal({ page, userId, onSave, onClose }) {
   const canvasRef = useRef(null)
   const imgRef = useRef(null)
   const selRef = useRef(null)   // always holds latest selection synchronously
+  const bboxRef = useRef(null)  // normalized bbox stored before canvas unmounts
   const startRef = useRef(null)
   const draggingRef = useRef(false)
   const [selection, setSelection] = useState(null) // drives visual redraw only
@@ -91,6 +92,7 @@ export default function AnnotationModal({ page, userId, onSave, onClose }) {
       const ny = Math.min(y1, y2) / canvas.height
       const nw = Math.abs(x2 - x1) / canvas.width
       const nh = Math.abs(y2 - y1) / canvas.height
+      bboxRef.current = { x: nx, y: ny, w: nw, h: nh }
 
       // Backend fetches the image and crops it server-side — no canvas taint issue
       const ocrRes = await fetch(`${BACKEND}/ocr-region`, {
@@ -128,14 +130,7 @@ export default function AnnotationModal({ page, userId, onSave, onClose }) {
     setLoading(true)
     setStatus('')
     try {
-      const canvas = canvasRef.current
-      const { x1, y1, x2, y2 } = selRef.current
-      const bbox = {
-        x: Math.min(x1, x2) / canvas.width,
-        y: Math.min(y1, y2) / canvas.height,
-        w: Math.abs(x2 - x1) / canvas.width,
-        h: Math.abs(y2 - y1) / canvas.height,
-      }
+      const bbox = bboxRef.current
       const { data, error } = await supabase
         .from('entries')
         .insert({ page_id: page.id, user_id: userId, french_phrase: ocrText, english_translation: translation, context_summary: summary, bbox })
