@@ -101,7 +101,10 @@ async def summarise(french: str, english: str) -> str:
                 "temperature": 0.3,
             },
         )
-        return r.json()["choices"][0]["message"]["content"].strip()
+        data = r.json()
+        if "choices" not in data:
+            return ""
+        return data["choices"][0]["message"]["content"].strip()
 
 
 @app.post("/process-image")
