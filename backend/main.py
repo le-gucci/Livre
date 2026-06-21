@@ -31,44 +31,49 @@ def ocr_region(img_bgr: np.ndarray, psm: int = 7) -> str:
 
 def detect_underlines(img: np.ndarray) -> list[dict]:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (60, 1))
-    lines_mask = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=2)
-    contours, _ = cv2.findContours(lines_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # CLAHE improves contrast for phone photos with uneven lighting
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+
+    blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
     h, w = img.shape[:2]
+    seen = {}  # deduplicate by approximate position
+
+    # Try multiple kernel widths to catch short and long underlines
+    for kw in [15, 25, 40, 60]:
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kw, 1))
+        mask = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=2)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            if cw < kw or ch > 15:
+                continue
+            key = (round(x / 20), round(y / 10))
+            if key not in seen:
+                seen[key] = (x, y, cw, ch)
+
     results = []
-
-    for cnt in contours:
-        x, y, cw, ch = cv2.boundingRect(cnt)
-        if cw < 40 or ch > 8:
+    for x, y, cw, ch in seen.values():
+        text_y1 = max(0, y - 45)
+        crop = img[text_y1:y, x : x + cw]
+        if crop.size == 0:
+            continue
+        text = ocr_region(crop, psm=7)
+        if len(text.strip()) < 2:
             continue
 
-        text_y1 = max(0, y - 40)
-        crop_bgr = img[text_y1:y, x : x + cw]
-        if crop_bgr.size == 0:
-            continue
-
-        text = ocr_region(crop_bgr, psm=7)
-        if len(text) < 3:
-            continue
-
-        # grab surrounding lines for contextual summary
         ctx_y1 = max(0, y - 130)
         ctx_y2 = min(h, y + 70)
-        ctx_bgr = img[ctx_y1:ctx_y2, max(0, x - 40) : min(w, x + cw + 40)]
-        context = ocr_region(ctx_bgr, psm=6) if ctx_bgr.size > 0 else ""
+        ctx_crop = img[ctx_y1:ctx_y2, max(0, x - 40) : min(w, x + cw + 40)]
+        context = ocr_region(ctx_crop, psm=6) if ctx_crop.size > 0 else ""
 
         results.append({
-            "phrase": text,
+            "phrase": text.strip(),
             "context": context,
-            "bbox": {
-                "x": x / w,
-                "y": text_y1 / h,
-                "w": cw / w,
-                "h": (y - text_y1) / h,
-            },
+            "bbox": {"x": x / w, "y": text_y1 / h, "w": cw / w, "h": (y - text_y1) / h},
         })
 
     return results
@@ -86,23 +91,20 @@ async def translate(text: str) -> str:
 async def summarise(french: str, english: str, context: str = "") -> str:
     if not GROQ_API_KEY:
         return ""
-
     has_context = context and context.strip() != french.strip() and len(context) > len(french) + 5
     if has_context:
         prompt = (
             f'Surrounding French text:\n"{context}"\n\n'
-            f'The reader underlined this phrase: "{french}" (translates to: "{english}")\n\n'
+            f'The reader underlined: "{french}" (translates to: "{english}")\n\n'
             "In one brief phrase, explain what the underlined expression means or contributes "
-            "in the context of the surrounding text — what idea, feeling, or narrative function it serves. "
-            "Be specific to the text, not generic. E.g. 'conveys the narrator\\'s detachment from his mother\\'s death'. "
-            "Reply with the phrase only."
+            "in the context of the surrounding text. Be specific to the text. "
+            "E.g. 'conveys the narrator\\'s detachment from his mother\\'s death'. Reply with the phrase only."
         )
     else:
         prompt = (
             f'French: "{french}"\nEnglish: "{english}"\n\n'
-            "In one brief phrase, what is this expression conveying or implying in context? Reply with the phrase only."
+            "In one brief phrase, what is this expression conveying? Reply with the phrase only."
         )
-
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -133,6 +135,38 @@ async def process_image(file: UploadFile = File(...)):
 
     results = await asyncio.gather(*[process_one(u) for u in underlines])
     return {"entries": list(results)}
+
+
+class OcrRegionBody(BaseModel):
+    image_url: str
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+@app.post("/ocr-region")
+async def ocr_region_endpoint(body: OcrRegionBody):
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.get(body.image_url)
+        r.raise_for_status()
+    img = load_image(r.content)
+    ih, iw = img.shape[:2]
+
+    x1 = max(0, int(body.x * iw))
+    y1 = max(0, int(body.y * ih))
+    x2 = min(iw, int((body.x + body.w) * iw))
+    y2 = min(ih, int((body.y + body.h) * ih))
+
+    phrase_crop = img[y1:y2, x1:x2]
+    text = ocr_region(phrase_crop, psm=7)
+
+    ph = y2 - y1
+    ctx_y1 = max(0, y1 - ph * 3)
+    ctx_y2 = min(ih, y2 + ph * 2)
+    context = ocr_region(img[ctx_y1:ctx_y2, 0:iw], psm=6)
+
+    return {"text": text, "context": context}
 
 
 @app.post("/ocr-crop")
